@@ -2,7 +2,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+from typing import List, Optional
 from rag.engine import get_chat_engine
+from llama_index.core.base.response.schema import Response
 
 # 1. Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -11,7 +13,7 @@ logger = logging.getLogger("notewise-api")
 # 2. Initialize App
 app = FastAPI(title="NoteWise AI API", version="0.1.0")
 
-# 3. Configure CORS (Allow Next.js Frontend)
+# 3. Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -20,8 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 4. Initialize Chat Engine (Global Singleton)
-# We do this lazily or on startup to avoid recreating it every request
+# 4. Initialize Chat Engine
 chat_engine = None
 
 @app.on_event("startup")
@@ -35,11 +36,17 @@ async def startup_event():
         logger.error(f"Failed to initialize Chat Engine: {e}")
 
 # 5. Data Models
+class Source(BaseModel):
+    filename: str
+    score: float
+    text: str
+
 class ChatRequest(BaseModel):
     message: str
 
 class ChatResponse(BaseModel):
     response: str
+    sources: List[Source] = []
 
 # 6. Routes
 @app.get("/health")
@@ -48,19 +55,35 @@ async def health_check():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-    """
-    Phase 3: RAG Chat Endpoint.
-    """
     if not chat_engine:
         raise HTTPException(status_code=503, detail="Chat engine not ready")
 
     logger.info(f"Received chat message: {request.message}")
     
-    # Call LlamaIndex RAG
-    # This retrieves documents -> calls GPT-4 -> returns answer
-    response = chat_engine.chat(request.message)
+    # Call LlamaIndex
+    response: Response = chat_engine.chat(request.message)
     
-    return ChatResponse(response=str(response))
+    # Extract Sources
+    sources = []
+    if hasattr(response, 'source_nodes'):
+        for node in response.source_nodes:
+            # Calculate a readable score (0-100%)
+            score = node.score if node.score else 0.0
+            
+            # Get filename from metadata (LlamaIndex stores it there automatically)
+            file_path = node.metadata.get('file_path', 'Unknown')
+            filename = file_path.split('/')[-1] # Just get the name "notes.md"
+            
+            sources.append(Source(
+                filename=filename,
+                score=score,
+                text=node.node.get_content()[:200] + "..." # Preview of text
+            ))
+            
+    return ChatResponse(
+        response=str(response),
+        sources=sources
+    )
 
 if __name__ == "__main__":
     import uvicorn
