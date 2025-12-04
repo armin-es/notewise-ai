@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Send, Bot, User, FileText } from 'lucide-react';
 
 interface Source {
@@ -19,10 +19,26 @@ export default function Home() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Initialize Session on Mount
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const res = await fetch('http://localhost:8000/session', { method: 'POST' });
+        const data = await res.json();
+        setSessionId(data.session_id);
+        console.log('Session initialized:', data.session_id);
+      } catch (err) {
+        console.error('Failed to init session:', err);
+      }
+    };
+    initSession();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !sessionId) return;
 
     const userMessage = input.trim();
     setInput('');
@@ -33,7 +49,10 @@ export default function Home() {
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({ 
+          message: userMessage,
+          session_id: sessionId 
+        }),
       });
 
       if (!response.ok) throw new Error('Failed to send message');
@@ -67,6 +86,7 @@ export default function Home() {
             <Bot className="w-6 h-6 text-blue-600" />
             NoteWise AI
           </h1>
+          {sessionId && <p className="text-xs text-gray-400 mt-1">Session: {sessionId.slice(0,8)}...</p>}
         </div>
 
         {/* Chat History */}
@@ -105,7 +125,7 @@ export default function Home() {
                 )}
               </div>
 
-              {/* Sources Section (Only for assistant) */}
+              {/* Sources Section */}
               {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
                 <div className="ml-11 max-w-[85%]">
                   <p className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1">
@@ -124,9 +144,6 @@ export default function Home() {
                         </div>
                         <div className="text-gray-400 mt-1 text-[10px]">
                           Relevance: {(source.score * 100).toFixed(0)}%
-                        </div>
-                        <div className="text-gray-500 mt-1 line-clamp-2 text-[10px] italic group-hover:text-gray-700">
-                          "{source.text}"
                         </div>
                       </div>
                     ))}
@@ -155,13 +172,13 @@ export default function Home() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about your notes..."
+              placeholder={sessionId ? "Ask about your notes..." : "Initializing..."}
               className="flex-1 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
-              disabled={isLoading}
+              disabled={isLoading || !sessionId}
             />
             <button
               type="submit"
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || !sessionId}
               className="bg-blue-600 text-white rounded-lg px-4 py-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <Send className="w-5 h-5" />
