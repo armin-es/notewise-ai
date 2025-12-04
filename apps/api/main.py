@@ -1,7 +1,9 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, status
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import os
 from typing import List, Optional, Dict
 from rag.engine import get_chat_engine
 from llama_index.core.base.response.schema import Response
@@ -14,6 +16,19 @@ logger = logging.getLogger("notewise-api")
 
 # 2. Initialize App
 app = FastAPI(title="NoteWise AI API", version="0.1.0")
+
+# Security Scheme
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key_header: str = Depends(api_key_header)):
+    if api_key_header == os.getenv("API_SECRET"):
+        return api_key_header
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials"
+        )
 
 # 3. Configure CORS
 app.add_middleware(
@@ -29,7 +44,7 @@ app.add_middleware(
 # In production, use Redis or Postgres for this!
 sessions: Dict[str, BaseChatEngine] = {}
 
-@app.post("/session")
+@app.post("/session", dependencies=[Depends(get_api_key)])
 async def create_session():
     session_id = str(uuid.uuid4())
     logger.info(f"Creating new session: {session_id}")
@@ -56,7 +71,7 @@ class ChatResponse(BaseModel):
 async def health_check():
     return {"status": "ok", "service": "notewise-api"}
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(get_api_key)])
 async def chat_endpoint(request: ChatRequest):
     session_id = request.session_id
     

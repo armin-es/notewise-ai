@@ -1,10 +1,6 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv(Path(__file__).parent.parent / ".env")
-
 from llama_index.core import (
     SimpleDirectoryReader,
     StorageContext,
@@ -14,7 +10,10 @@ from llama_index.core import (
 from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
-import psycopg2
+from sqlalchemy import make_url
+
+# Load environment variables
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # Configure LlamaIndex Settings
 Settings.llm = OpenAI(model="gpt-4o")
@@ -23,42 +22,27 @@ Settings.embedding = OpenAIEmbedding(model="text-embedding-3-small")
 def ingest_notes():
     print("🚀 Starting ingestion...")
 
-    # 1. Connect to Postgres
-    db_name = "notewise_db"
-    host = "localhost"
-    password = "password"
-    port = "5432"
-    user = "postgres"
+    # 1. Connect to Postgres (Dynamic from Env)
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError("DATABASE_URL not set in .env")
 
-    # Create connection string/args
-    url = "postgresql://{user}:{password}@{host}:{port}/{db_name}"
+    # Parse URL to get params
+    url = make_url(database_url)
     
     vector_store = PGVectorStore.from_params(
-        database=db_name,
-        host=host,
-        password=password,
-        port=port,
-        user=user,
+        database=url.database,
+        host=url.host,
+        password=url.password,
+        port=url.port,
+        user=url.username,
         table_name="data_embeddings",
-        embed_dim=1536,  # Dimensions for text-embedding-3-small
+        embed_dim=1536,
     )
 
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
     # 2. Load Documents
-    # Target: The root 'notes' directory. 
-    # We are in apps/api/rag/ingestion.py -> Go up 6 levels to reach root?
-    # Let's use an absolute path logic based on where we run this script.
-    
-    # Assuming we run this from 'apps/api'
-    # Root is ../../../../../
-    
-    # Let's try to find the "behavioral" folder as a test target first
-    # to avoid ingesting the huge node_modules in projects/
-    
-    current_file = Path(__file__).resolve()
-    # notewise-ai/apps/api/rag/ingestion.py
-    
     # We want to reach /Users/armin/Documents - Local/notes/behavioral
     target_dir = Path("/Users/armin/Documents - Local/notes/behavioral")
 
@@ -89,4 +73,3 @@ def ingest_notes():
 
 if __name__ == "__main__":
     ingest_notes()
-

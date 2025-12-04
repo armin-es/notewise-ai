@@ -25,7 +25,12 @@ export default function Home() {
   useEffect(() => {
     const initSession = async () => {
       try {
-        const res = await fetch('http://localhost:8000/session', { method: 'POST' });
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/session`, { 
+          method: 'POST',
+          headers: {
+            'X-API-Key': process.env.NEXT_PUBLIC_API_SECRET || '',
+          }
+        });
         const data = await res.json();
         setSessionId(data.session_id);
         console.log('Session initialized:', data.session_id);
@@ -46,10 +51,13 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/chat', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-API-Key': process.env.NEXT_PUBLIC_API_SECRET || '',
+        },
+        body: JSON.stringify({  
           message: userMessage,
           session_id: sessionId 
         }),

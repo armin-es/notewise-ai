@@ -5,6 +5,7 @@ from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
+from sqlalchemy import make_url
 
 # Load env vars
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -18,13 +19,19 @@ def get_chat_engine():
     Connects to the existing Vector Store and returns a Chat Engine.
     """
     
-    # 1. Connect to Postgres (Same params as ingestion)
+    # 1. Connect to Postgres (Dynamic from Env)
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError("DATABASE_URL not set in .env")
+
+    url = make_url(database_url)
+
     vector_store = PGVectorStore.from_params(
-        database="notewise_db",
-        host="localhost",
-        password="password",
-        port="5432",
-        user="postgres",
+        database=url.database,
+        host=url.host,
+        password=url.password,
+        port=url.port,
+        user=url.username,
         table_name="data_embeddings",
         embed_dim=1536,
     )
@@ -42,4 +49,3 @@ def get_chat_engine():
         "If the answer is not in the notes, say you don't know."
         "Keep answers concise and helpful."
     ))
-
