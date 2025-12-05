@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Send, Bot, User, FileText } from 'lucide-react';
+import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from '@clerk/nextjs';
 
 interface Source {
   filename: string;
@@ -20,15 +21,17 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const { getToken } = useAuth();
 
   // Initialize Session on Mount
   useEffect(() => {
     const initSession = async () => {
       try {
+        const token = await getToken();
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/session`, { 
           method: 'POST',
           headers: {
-            'X-API-Key': process.env.NEXT_PUBLIC_API_SECRET || '',
+            'Authorization': `Bearer ${token}`,
           }
         });
         const data = await res.json();
@@ -39,7 +42,7 @@ export default function Home() {
       }
     };
     initSession();
-  }, []);
+  }, [getToken]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,13 +54,14 @@ export default function Home() {
     setIsLoading(true);
 
     try {
+      const token = await getToken();
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/chat`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'X-API-Key': process.env.NEXT_PUBLIC_API_SECRET || '',
+          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({  
+        body: JSON.stringify({ 
           message: userMessage,
           session_id: sessionId 
         }),
@@ -89,16 +93,46 @@ export default function Home() {
     <main className="flex min-h-screen flex-col items-center bg-gray-50 p-4">
       <div className="w-full max-w-2xl bg-white rounded-lg shadow-md overflow-hidden flex flex-col h-[80vh]">
         {/* Header */}
-        <div className="p-4 border-b bg-white">
-          <h1 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
-            <Bot className="w-6 h-6 text-blue-600" />
-            NoteWise AI
-          </h1>
-          {sessionId && <p className="text-xs text-gray-400 mt-1">Session: {sessionId.slice(0,8)}...</p>}
+        <div className="p-4 border-b bg-white flex justify-between items-center">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+              <Bot className="w-6 h-6 text-blue-600" />
+              NoteWise AI
+            </h1>
+            {sessionId && <p className="text-xs text-gray-400 mt-1">Session: {sessionId.slice(0,8)}...</p>}
+          </div>
+          <div>
+            <SignedOut>
+              <SignInButton mode="modal">
+                <button className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors">
+                  Sign In
+                </button>
+              </SignInButton>
+            </SignedOut>
+            <SignedIn>
+              <UserButton />
+            </SignedIn>
+          </div>
         </div>
 
-        {/* Chat History */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        <SignedOut>
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                <Bot className="w-16 h-16 text-blue-200 mb-4" />
+                <h2 className="text-xl font-semibold text-gray-700 mb-2">Welcome to NoteWise AI</h2>
+                <p className="text-gray-500 mb-6 max-w-md">
+                    Please sign in to access your personal note assistant and start chatting with your knowledge base.
+                </p>
+                <SignInButton mode="modal">
+                    <button className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                        Sign In to Continue
+                    </button>
+                </SignInButton>
+            </div>
+        </SignedOut>
+
+        <SignedIn>
+            {/* Chat History */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-6">
           {messages.length === 0 && (
             <div className="text-center text-gray-400 mt-10">
               <p>Start a conversation with your notes.</p>
@@ -193,6 +227,7 @@ export default function Home() {
             </button>
           </form>
         </div>
+        </SignedIn>
       </div>
     </main>
   );

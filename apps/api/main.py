@@ -1,5 +1,9 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, status
-from fastapi.security import APIKeyHeader
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
+from jwt.algorithms import RSAAlgorithm
+import httpx
+import json
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -17,18 +21,56 @@ logger = logging.getLogger("notewise-api")
 # 2. Initialize App
 app = FastAPI(title="NoteWise AI API", version="0.1.0")
 
-# Security Scheme
-API_KEY_NAME = "X-API-Key"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+# Security Scheme (Clerk)
+security = HTTPBearer()
 
-async def get_api_key(api_key_header: str = Depends(api_key_header)):
-    if api_key_header == os.getenv("API_SECRET"):
-        return api_key_header
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials"
+async def verify_clerk_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    jwks_url = os.getenv("CLERK_JWKS_URL")  # We need to set this!
+
+    if not jwks_url:
+        # Fallback if URL not in env (try to deduce or use default)
+        # For now, fail if not set
+        logger.error("CLERK_JWKS_URL not set")
+        raise HTTPException(status_code=500, detail="Server misconfiguration: Missing JWKS URL")
+
+    try:
+        # Fetch JWKS (Cache this in production!)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(jwks_url)
+            jwks = response.json()
+
+        # Decode Header to find Key ID (kid)
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+
+        # Find the matching key in JWKS
+        key_data = next((k for k in jwks["keys"] if k["kid"] == kid), None)
+        
+        if not key_data:
+             raise HTTPException(status_code=401, detail="Invalid token key ID")
+
+        # Construct Public Key
+        public_key = RSAAlgorithm.from_jwk(json.dumps(key_data))
+
+        # Verify Token
+        payload = jwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False} # Audience varies, usually verify_signature is enough for this
         )
+        
+        return payload["sub"] # Returns User ID
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.error(f"Token validation error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"Auth error: {e}")
+        raise HTTPException(status_code=500, detail="Authentication failed")
 
 # 3. Configure CORS
 app.add_middleware(
@@ -44,10 +86,14 @@ app.add_middleware(
 # In production, use Redis or Postgres for this!
 sessions: Dict[str, BaseChatEngine] = {}
 
-@app.post("/session", dependencies=[Depends(get_api_key)])
-async def create_session():
+@app.post("/session")
+async def create_session(user_id: str = Depends(verify_clerk_token)):
+    # We can now scope sessions to user_id if we want
+    # For now, we still generate a random session_id for the chat instance, 
+    # but we could map user_id -> session_id in a database.
+    
     session_id = str(uuid.uuid4())
-    logger.info(f"Creating new session: {session_id}")
+    logger.info(f"Creating new session for User {user_id}: {session_id}")
     # Create a fresh engine for this user
     sessions[session_id] = get_chat_engine()
     return {"session_id": session_id}
@@ -71,8 +117,8 @@ class ChatResponse(BaseModel):
 async def health_check():
     return {"status": "ok", "service": "notewise-api"}
 
-@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(get_api_key)])
-async def chat_endpoint(request: ChatRequest):
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest, user_id: str = Depends(verify_clerk_token)):
     session_id = request.session_id
     
     if session_id not in sessions:
