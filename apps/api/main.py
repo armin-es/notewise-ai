@@ -95,7 +95,7 @@ async def create_session(user_id: str = Depends(verify_clerk_token)):
     session_id = str(uuid.uuid4())
     logger.info(f"Creating new session for User {user_id}: {session_id}")
     # Create a fresh engine for this user
-    sessions[session_id] = get_chat_engine()
+    sessions[session_id] = get_chat_engine(user_id=user_id)
     return {"session_id": session_id}
 
 # 5. Data Models
@@ -124,7 +124,7 @@ async def chat_endpoint(request: ChatRequest, user_id: str = Depends(verify_cler
     if session_id not in sessions:
         # Lazy init if session lost (server restart)
         logger.warning(f"Session {session_id} not found, creating new engine.")
-        sessions[session_id] = get_chat_engine()
+        sessions[session_id] = get_chat_engine(user_id=user_id)
     
     chat_engine = sessions[session_id]
 

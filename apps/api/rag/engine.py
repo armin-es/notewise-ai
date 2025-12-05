@@ -3,6 +3,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.vector_stores.postgres import PGVectorStore
+from llama_index.storage.chat_store.postgres import PostgresChatStore
+from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from sqlalchemy import make_url
@@ -14,7 +16,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 Settings.llm = OpenAI(model="gpt-4o")
 Settings.embedding = OpenAIEmbedding(model="text-embedding-3-small")
 
-def get_chat_engine():
+def get_chat_engine(user_id: str):
     """
     Connects to the existing Vector Store and returns a Chat Engine.
     """
@@ -40,12 +42,28 @@ def get_chat_engine():
     # We tell LlamaIndex: "The data is already in this vector store"
     index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
 
-    # 3. Create Chat Engine
+    # 3. Setup Persistent Chat Memory
+    chat_store = PostgresChatStore.from_uri(
+        uri=database_url,
+        table_name="chat_history",
+    )
+    
+    memory = ChatMemoryBuffer.from_defaults(
+        token_limit=3000, 
+        chat_store=chat_store, 
+        chat_store_key=user_id
+    )
+
+    # 4. Create Chat Engine
     # "context" mode: Retrieves relevant chunks and adds them to context
-    return index.as_chat_engine(chat_mode="context", system_prompt=(
-        "You are NoteWise AI, a personal knowledge assistant."
-        "You have access to the user's personal notes and interview stories."
-        "Always answer based on the provided context."
-        "If the answer is not in the notes, say you don't know."
-        "Keep answers concise and helpful."
-    ))
+    return index.as_chat_engine(
+        chat_mode="context", 
+        memory=memory,
+        system_prompt=(
+            "You are NoteWise AI, a personal knowledge assistant."
+            "You have access to the user's personal notes and interview stories."
+            "Always answer based on the provided context."
+            "If the answer is not in the notes, say you don't know."
+            "Keep answers concise and helpful."
+        )
+    )
